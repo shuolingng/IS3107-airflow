@@ -53,6 +53,16 @@ If you cannot access Airflow at `localhost:8080`, it may be because `localhost:8
 4. Check if your firewall or antivirus is blocking port 8080.
 5. Test port accessibility using `curl http://localhost:8080` or `netstat -an | grep 8080`.
 
+## Shut down and turn off
+
+1. Shut Down Airflow Containers: To stop the Airflow containers that are running in the background, open a terminal and navigate to the root directory of your Airflow setup (where your docker-compose.yaml file is located). Then run the following command:
+```bash
+docker-compose down
+```
+This command stops and removes the containers, networks, volumes, and images created by docker-compose up.
+
+2. Quit Docker App
+
 
 ## Notes and Warnings
 This setup is intended for local development and testing. It is not suitable for a production environment.
