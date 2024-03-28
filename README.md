@@ -33,14 +33,14 @@ This command processes the Dockerfile and docker-compose.yaml configurations to 
 
 6. Start Airflow Using Docker Compose: Use the docker-compose up command to start all defined services in containers. This command utilizes the docker-compose.yaml file located in the repository's root directory.
 ```bash
-docker-compose up
+docker compose up
 ```
 
 6. Access the Airflow Web Interface: Once the containers are running, the Airflow web interface should be accessible at http://localhost:8080. Here, you can manage workflows and monitor DAG execution.
 
 7. Explore and Modify the DAGs: The dags folder contains Directed Acyclic Graphs (DAGs) definitions. You can add new DAG files or modify existing ones to define your workflows.
 
-Note: Additional Python Dependencies: If your DAGs require additional Python packages, add them to the requirements.txt file. You can rebuild the Docker image or mount the requirements.txt file in docker-compose.yaml to install these dependencies when the container starts.
+Note: Additional Python Dependencies: If your DAGs require additional Python packages, add them to the requirements.txt file. You can stop running and remove docker image```docker compose down``` then rebuild the Docker image ```docker compose build``` ```docker compose up``` to install these dependencies when the container starts.
 Logs and Debugging: The logs folder contains logs for DAG runs. Review these logs if you encounter issues with your workflows.
 
 ## Troubleshooting
@@ -52,6 +52,16 @@ If you cannot access Airflow at `localhost:8080`, it may be because `localhost:8
 3. Verify the port mapping in `docker-compose.yaml` matches `"8080:8080"` under the `airflow-webserver` service.
 4. Check if your firewall or antivirus is blocking port 8080.
 5. Test port accessibility using `curl http://localhost:8080` or `netstat -an | grep 8080`.
+
+## Shut down and turn off
+
+1. Shut Down Airflow Containers: To stop the Airflow containers that are running in the background, open a terminal and navigate to the root directory of your Airflow setup (where your docker-compose.yaml file is located). Then run the following command:
+```bash
+docker compose down
+```
+This command stops and removes the containers, networks, volumes, and images created by docker-compose up. This is crucial to save local storage and memory
+
+2. Quit Docker App
 
 
 ## Notes and Warnings
