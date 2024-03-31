@@ -113,10 +113,8 @@ def glassdoor_scraper_dag():
         max_jobs_to_scrape = 150
         total_job_data = []
 
-        for index in SEARCH_QUERY_LIST:
+        for job_field in SEARCH_QUERY_LIST:
             total_job_data_in_each_field = []
-
-            job_field = SEARCH_QUERY_LIST[index]
             driver = init_driver()
             driver.get(BASE_URL)
             search_bar = driver.find_element(By.ID, "searchBar-jobTitle")
