@@ -12,8 +12,14 @@ from datetime import date, timedelta
 from airflow.decorators import dag, task
 from airflow.operators.python import PythonOperator
 from datetime import datetime
+from google.oauth2 import service_account
+import pandas_gbq
 
 #%% Define Indeed Functions
+# keyword_list = ["Data analyst", "Database administrator", "Data modeler", "Software engineer", "Data engineer", "Data architect", 
+#     "Statistician", "Business intelligence developer", "Marketing scientist", "Business analyst", "Quantitative analyst", 
+#     "Data scientist", "Computer & information research scientist", "Machine learning engineer"]
+
 #Chrome options
 user_agent = 'Mozilla/5.0 (Windows NT 6.1) AppleWebKit/537.2 (KHTML, like Gecko) Chrome/22.0.1216.0 Safari/537.2'
 chrome_options = webdriver.ChromeOptions()
@@ -26,6 +32,7 @@ chrome_options.add_argument("--no-sandbox")
 chrome_options.add_argument("--disable-dev-shm-usage")
 remote_webdriver = 'remote_chromedriver'
 today = date.today()
+today_str = today.strftime("%d %B %Y")
 
 # Helper Functions
 def get_search_url(keyword, offset=0):
@@ -39,7 +46,7 @@ def clean(text):
 
 def clean_num(num):
     cleaned = num.replace(",", "").replace("$", "").replace(" ", "")
-    return int(cleaned)
+    return float(cleaned)
 
 def deal_with_salary(salary):
     salary_range, salary_freq = re.split(r'\s+a\s+|\s+an\s+', salary)
@@ -52,16 +59,25 @@ def deal_with_salary(salary):
     return salary_min, salary_max, salary_freq
 
 def save_to_excel(job_list, company_info_list):
-        # Job info
-        df = pd.DataFrame(job_list) 
-        if not os.path.exists("./Output"):
-            os.makedirs("./Output")
-        df.to_excel(f"./Output/indeed.xlsx", index=False)
-        # Company info
-        company_df = pd.DataFrame(company_info_list) 
-        company_df = company_df.dropna(subset=['Company']).drop_duplicates(subset=['Company'])
-        company_df.to_excel(f"./Output/Company.xlsx", index=False)
-        return None
+    # Job info
+    df = pd.DataFrame(job_list) 
+    df.dropna(subset=['Title'], inplace=True)
+
+    # bigquery authentication
+    parent_wd = os.path.dirname(os.getcwd())
+    cred_path = os.path.join(parent_wd, "airflow", "auth", "is3107-416813-f8b1bf76ef57.json")
+    credentials = service_account.Credentials.from_service_account_file(cred_path)
+    # write dataframe to bigquery table
+    project_id = "is3107-416813"
+    table_id = 'is3107-416813.is3107_scraped_data.indeed_data'
+    schema = [{'name': 'Salary_min', 'type': 'FLOAT64'}]
+    pandas_gbq.to_gbq(df, table_id, project_id, credentials = credentials, if_exists='append', table_schema=schema)
+
+    # Company info
+    company_df = pd.DataFrame(company_info_list) 
+    company_df = company_df.dropna(subset=['Company']).drop_duplicates(subset=['Company'])
+    company_df.to_excel(f"./Output/Company.xlsx", index=False)
+    return None
 
 
 # Main Functions
@@ -134,14 +150,15 @@ def get_job_info(i, all_li, driver, keyword):
     except: job["Application_link"]=None
 
     job["Field"]=keyword
-    job["Date_scraped"]=today
+    job["Date_scraped"]=today_str
 
     return job, company_info
 
 
 def get_keyword_data(keyword, job_list, company_info_list):
     with webdriver.Remote(f'{remote_webdriver}:4444/wd/hub', options=chrome_options) as driver:
-        for offset in range(0, 10, 10): # for each page, for 10 pages
+        # rmb to change 2nd num to 100 after testing phase!
+        for offset in range(0, 10, 15): # for each page, for 10 pages
             search_page = get_search_url(keyword, offset)
             try:
                 driver.get(search_page) 
@@ -225,10 +242,23 @@ def indeed_scraper():
         save_to_excel(job_list, company_info_list) 
         return job_list[:1]
     
+    @task(task_id="scrape_indeed_data3")
+    def scrape_indeed_data3():
+        # Define variables
+        keyword_list = ["Statistician"]
+        company_info_list = []
+        job_list = []
+        # Get data
+        for keyword in keyword_list: # for each job field
+            job_list, company_info_list = get_keyword_data(keyword, job_list, company_info_list)
+        # Save info
+        save_to_excel(job_list, company_info_list) 
+        return job_list[:1]
+    
 
     # Execute tasks
     scrape_indeed_data1()
-    scrape_indeed_data2()
+    # [scrape_indeed_data1(), scrape_indeed_data2(), scrape_indeed_data3()]
 
 dag_instance = indeed_scraper()
 
