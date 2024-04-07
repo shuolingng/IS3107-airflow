@@ -58,7 +58,7 @@ def deal_with_salary(salary):
         salary_max = clean_num(salary_range[1])
     return salary_min, salary_max, salary_freq
 
-def save_to_excel(job_list, company_info_list):
+def save_to_db(job_list, company_info_list):
     # Job info
     df = pd.DataFrame(job_list) 
     df.dropna(subset=['Title'], inplace=True)
@@ -73,10 +73,6 @@ def save_to_excel(job_list, company_info_list):
     schema = [{'name': 'Salary_min', 'type': 'FLOAT64'}]
     pandas_gbq.to_gbq(df, table_id, project_id, credentials = credentials, if_exists='append', table_schema=schema)
 
-    # Company info
-    company_df = pd.DataFrame(company_info_list) 
-    company_df = company_df.dropna(subset=['Company']).drop_duplicates(subset=['Company'])
-    company_df.to_excel(f"./Output/Company.xlsx", index=False)
     return None
 
 
@@ -200,7 +196,7 @@ def get_keyword_data(keyword, job_list, company_info_list):
 default_args = {
     "owner": "airflow",
     "start_date": datetime(2024, 1, 1),
-    "retries": 3,
+    "retries": 0, # for testing
     "retry_delay": timedelta(seconds=10)
 }
 
@@ -225,21 +221,21 @@ def indeed_scraper():
         for keyword in keyword_list: # for each job field
             job_list, company_info_list = get_keyword_data(keyword, job_list, company_info_list)
         # Save info
-        save_to_excel(job_list, company_info_list) 
+        save_to_db(job_list, company_info_list) 
         return job_list[:1]
     
 
     @task(task_id="scrape_indeed_data2")
     def scrape_indeed_data2():
         # Define variables
-        keyword_list = ["Software engineer", "Data engineer"]
+        keyword_list = ["Software engineer"]
         company_info_list = []
         job_list = []
         # Get data
         for keyword in keyword_list: # for each job field
             job_list, company_info_list = get_keyword_data(keyword, job_list, company_info_list)
         # Save info
-        save_to_excel(job_list, company_info_list) 
+        save_to_db(job_list, company_info_list) 
         return job_list[:1]
     
     @task(task_id="scrape_indeed_data3")
@@ -252,7 +248,7 @@ def indeed_scraper():
         for keyword in keyword_list: # for each job field
             job_list, company_info_list = get_keyword_data(keyword, job_list, company_info_list)
         # Save info
-        save_to_excel(job_list, company_info_list) 
+        save_to_db(job_list, company_info_list) 
         return job_list[:1]
     
 
