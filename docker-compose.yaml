@@ -57,11 +57,13 @@ x-airflow-common:
     AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
     AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://airflow:airflow@postgres/airflow
     AIRFLOW__CELERY__BROKER_URL: redis://:@redis:6379/0
-    AIRFLOW__CORE__PARALLELISM: 20  # max num of tasks allowed to run concurrently by scheduler
+    AIRFLOW__CORE__PARALLELISM: 40  # max num of tasks allowed to run concurrently by scheduler
     AIRFLOW__CORE__MAX_ACTIVE_TASKS_PER_DAG: 10  # max num of active DAG runs allowed to run concurrently
     AIRFLOW__CORE__FERNET_KEY: ''
+    AIRFLOW__CORE__DAGBAG_IMPORT_TIMEOUT: 100
     AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
     AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+    PYTHONASYNCIODEBUG: 1
     AIRFLOW__API__AUTH_BACKENDS: 'airflow.api.auth.backend.basic_auth,airflow.api.auth.backend.session'
     # yamllint disable rule:line-length
     # Use simple http server on scheduler for health checks
@@ -122,13 +124,10 @@ services:
       - "8080:8080"
     healthcheck:
       test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
-      interval: 30s
+      interval: 10s
       timeout: 10s
       retries: 5
-      start_period: 30s
     restart: always
-    environment:
-      <<: *airflow-common-env
     depends_on:
       <<: *airflow-common-depends-on
       airflow-init:
@@ -142,10 +141,8 @@ services:
       interval: 30s
       timeout: 10s
       retries: 5
-      start_period: 30s
+      # start_period: 30s
     restart: always
-    environment:
-      <<: *airflow-common-env
     depends_on:
       <<: *airflow-common-depends-on
       airflow-init:
@@ -167,7 +164,7 @@ services:
       <<: *airflow-common-env
       # Required to handle warm shutdown of the celery workers properly
       # See https://airflow.apache.org/docs/docker-stack/entrypoint.html#signal-propagation
-      DUMB_INIT_SETSID: "1"  # need to write custom functions for graceful shutdown if 0 
+      DUMB_INIT_SETSID: "0"  # need to write custom functions for graceful shutdown if 0? 
     restart: always
     depends_on:
       <<: *airflow-common-depends-on
@@ -187,7 +184,7 @@ services:
       start_period: 30s
     environment:
       <<: *airflow-common-env
-      DUMB_INIT_SETSID: "1"
+      DUMB_INIT_SETSID: "0"
     restart: always
     depends_on:
       <<: *airflow-common-depends-on
@@ -202,7 +199,7 @@ services:
       interval: 30s
       timeout: 10s
       retries: 5
-      start_period: 30s
+      # start_period: 30s
     restart: always
     depends_on:
       <<: *airflow-common-depends-on
@@ -317,6 +314,10 @@ services:
       - "4444:4444"
     restart: always
     shm_size: '5gb'
+    environment:
+      - SE_NODE_OVERRIDE_MAX_SESSIONS=true
+      - SE_NODE_MAX_SESSIONS=4
+      - SE_SESSION_REQUEST_TIMEOUT=3600
 
 volumes:
   postgres-db-volume:
