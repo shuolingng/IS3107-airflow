@@ -23,7 +23,7 @@ BASE_URL = 'https://www.glassdoor.sg/Job/index.htm'
 #service = Service(executable_path=ChromeDriverManager().install())
 #user_agent = 'Mozilla/5.0 (Windows NT 6.1) AppleWebKit/537.2 (KHTML, like Gecko) Chrome/22.0.1216.0 Safari/537.2'
 user_agent = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
-max_jobs_to_scrape = 5 # actual is 150
+max_jobs_to_scrape = 90 # actual is 100
 
 def init_driver():
     chrome_options = webdriver.ChromeOptions()
@@ -45,13 +45,12 @@ def dismiss_modal(driver):
         close_button = driver.find_element(By.CSS_SELECTOR, ".closeButtonWrapper .CloseButton")
         close_button.click()
         print("Modal closed")
-        time.sleep(2)
     except (NoSuchElementException, ElementClickInterceptedException):
         pass
 
 def click_show_more_until_done(driver):
     count = 1 # num of 'pgs'
-    while count <= 3: # each pg got 30 jobs, actual is 5
+    while count <= 3: # each pg got 30 jobs
         try:
             dismiss_modal(driver)
             show_more_button = WebDriverWait(driver, 10).until(
@@ -72,11 +71,12 @@ def click_show_more_job_description(driver):
             EC.presence_of_element_located((By.CSS_SELECTOR, "button.JobDetails_showMore___Le6L"))
         )
         show_more_button.click()
-        time.sleep(2)
     except (NoSuchElementException, ElementClickInterceptedException, TimeoutException):
         pass
 
 def clean_num(num):
+    if num == "":
+        return None
     cleaned = num.replace(",", "").replace("$", "").replace(" ", "").replace("K", "000")
     return float(cleaned)
 
@@ -91,8 +91,8 @@ def parse_salary(salary_str):
         salary_max = clean_num(salary_range[1].strip().split(' ')[0])  # Removing currency and extra spaces
     else:
         # For salaries without a range, set both min and max to the same value
-        salary_parts = salary_str.split(' ')
-        salary_min = salary_max = salary_parts[1]
+        salary_parts = salary_str.strip().split(' ')
+        salary_min = salary_max = clean_num(salary_parts[0])
     
     return [salary_min, salary_max]
 
@@ -107,7 +107,7 @@ def interpret_pay_period(pay_period_str):
         return None
 
 #%% Main function
-def get_keyword_data(job_field, max_jobs_to_scrape, total_job_data):
+def get_keyword_data(job_field, max_jobs_to_scrape):
     total_job_data_in_each_field = []
     driver = init_driver()
     driver.get(BASE_URL)
@@ -121,6 +121,7 @@ def get_keyword_data(job_field, max_jobs_to_scrape, total_job_data):
     click_show_more_until_done(driver)
     print("Now attemping to scrape all the jobs listings")
 
+    time.sleep(2)
     job_listings = driver.find_elements(By.CSS_SELECTOR, "li.JobsList_jobListItem__wjTHv")[:-1]
     print(f"Total available job listings to scrape: {len(job_listings)}")
 
@@ -130,7 +131,9 @@ def get_keyword_data(job_field, max_jobs_to_scrape, total_job_data):
         try:            
             job_listings = driver.find_elements(By.CSS_SELECTOR, "li.JobsList_jobListItem__wjTHv")
             job_listing = job_listings[index]
-            job_listing.click()
+            try: job_listing.click()
+            except ElementClickInterceptedException as e:
+                dismiss_modal(driver)
             click_show_more_job_description(driver)
             
             #Scraping logic
@@ -187,16 +190,14 @@ def get_keyword_data(job_field, max_jobs_to_scrape, total_job_data):
                 "Field": job_field
             })
 
-            time.sleep(2)
             print(f"job counter {index + 1}")
 
-        except (NoSuchElementException, TimeoutException):
-            # time.sleep(5)
+        except Exception as e: 
+            print(f'Skipped: job counter {index + 1}. Error: {e}')
             continue
 
-    total_job_data.extend(total_job_data_in_each_field)
     driver.quit()
-    return total_job_data
+    return total_job_data_in_each_field
 
 def save_to_db(job_data):
     df = pd.DataFrame(job_data)
@@ -213,7 +214,7 @@ def save_to_db(job_data):
 default_args = {
     "owner": "airflow",
     "start_date": datetime(2024, 1, 1),
-    "retries": 1,
+    "retries": 0,
     "retry_delay": timedelta(seconds=1)
 }
 
@@ -228,13 +229,46 @@ default_args = {
 def glassdoor_scraper_dag():
     @task
     def scrape_glassdoor1():
-        total_job_data = []
-        SEARCH_QUERY_LIST = ["Software engineer"]
+        SEARCH_QUERY_LIST = ["Data analyst", "Database administrator", "Data modeler"]
         for job_field in SEARCH_QUERY_LIST:
-            total_job_data = get_keyword_data(job_field, max_jobs_to_scrape, total_job_data)
-        save_to_db(total_job_data)
+            total_job_data = get_keyword_data(job_field, max_jobs_to_scrape)
+            save_to_db(total_job_data)
+        return total_job_data[:1]
+
+    @task
+    def scrape_glassdoor2():
+        SEARCH_QUERY_LIST = ["Software engineer", "Data engineer", "Data architect"]
+        for job_field in SEARCH_QUERY_LIST:
+            total_job_data = get_keyword_data(job_field, max_jobs_to_scrape)
+            save_to_db(total_job_data)
         return total_job_data[:1]
     
-    scrape_glassdoor1()
+    @task
+    def scrape_glassdoor3():
+        SEARCH_QUERY_LIST = ["Statistician", "Business intelligence developer", "Marketing scientist"]
+        for job_field in SEARCH_QUERY_LIST:
+            total_job_data = get_keyword_data(job_field, max_jobs_to_scrape)
+            save_to_db(total_job_data)
+        return total_job_data[:1]
+
+    @task
+    def scrape_glassdoor4():
+        # SEARCH_QUERY_LIST = ["Business analyst", "Quantitative analyst", "Data scientist"]
+        SEARCH_QUERY_LIST = ["Quantitative analyst", "Data scientist"]
+        for job_field in SEARCH_QUERY_LIST:
+            total_job_data = get_keyword_data(job_field, max_jobs_to_scrape, )
+            save_to_db(total_job_data)
+        return total_job_data[:1]
+    
+    @task
+    def scrape_glassdoor5():
+        SEARCH_QUERY_LIST = ["Computer & information research scientist", "Machine learning engineer"]
+        for job_field in SEARCH_QUERY_LIST:
+            total_job_data = get_keyword_data(job_field, max_jobs_to_scrape)
+            save_to_db(total_job_data)
+        return total_job_data[:1]
+    
+    scrape_glassdoor5()
+    # [scrape_glassdoor1(), scrape_glassdoor2()]
 
 dag_instance = glassdoor_scraper_dag()
