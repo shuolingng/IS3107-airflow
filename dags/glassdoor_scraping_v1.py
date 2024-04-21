@@ -16,14 +16,8 @@ from selenium.common.exceptions import NoSuchElementException, ElementClickInter
 # Global variables for configurability and easy maintenance
 date_scraped = date.today()
 BASE_URL = 'https://www.glassdoor.sg/Job/index.htm'
-# SEARCH_QUERY_LIST = ["Software engineer", "Data analyst", "Database administrator", "Data modeler", "Data engineer", "Data architect",
-#                 "Statistician","Business intelligence (BI) developer", "Marketing scientist", "Business analyst", "Quantitative analyst",
-#                 "Data scientist","Computer & information research scientist", "Machine learning engineer"]
-#user_agent = UserAgent().random
-#service = Service(executable_path=ChromeDriverManager().install())
-#user_agent = 'Mozilla/5.0 (Windows NT 6.1) AppleWebKit/537.2 (KHTML, like Gecko) Chrome/22.0.1216.0 Safari/537.2'
 user_agent = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
-max_jobs_to_scrape = 90 # actual is 100
+max_jobs_to_scrape = 70
 
 def init_driver():
     chrome_options = webdriver.ChromeOptions()
@@ -42,17 +36,20 @@ def init_driver():
 
 def dismiss_modal(driver):
     try:
-        close_button = driver.find_element(By.CSS_SELECTOR, ".closeButtonWrapper .CloseButton")
+        close_button = WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.CSS_SELECTOR, ".closeButtonWrapper .CloseButton")))
         close_button.click()
         print("Modal closed")
+        time.sleep(2)
     except (NoSuchElementException, ElementClickInterceptedException):
         pass
+    finally:
+        return driver
 
 def click_show_more_until_done(driver):
     count = 1 # num of 'pgs'
-    while count <= 3: # each pg got 30 jobs
+    while count <= 2: # each pg got 30 jobs
         try:
-            dismiss_modal(driver)
+            driver = dismiss_modal(driver)
             show_more_button = WebDriverWait(driver, 10).until(
                 EC.element_to_be_clickable((By.CSS_SELECTOR, "div.JobsList_buttonWrapper__ticwb button"))
             )
@@ -68,11 +65,13 @@ def click_show_more_until_done(driver):
 def click_show_more_job_description(driver):
     try:
         show_more_button = WebDriverWait(driver, 10).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, "button.JobDetails_showMore___Le6L"))
+            EC.element_to_be_clickable((By.CSS_SELECTOR, "button.JobDetails_showMore___Le6L"))
         )
         show_more_button.click()
     except (NoSuchElementException, ElementClickInterceptedException, TimeoutException):
         pass
+    finally:
+        return driver
 
 def clean_num(num):
     if num == "":
@@ -107,23 +106,23 @@ def interpret_pay_period(pay_period_str):
         return None
 
 #%% Main function
-def get_keyword_data(job_field, max_jobs_to_scrape):
+def get_keyword_data_glassdoor(job_field, max_jobs_to_scrape):
     total_job_data_in_each_field = []
     driver = init_driver()
     driver.get(BASE_URL)
-    search_bar = driver.find_element(By.ID, "searchBar-jobTitle")
+    search_bar = WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.ID, "searchBar-jobTitle")))
     search_bar.clear()
     search_bar.send_keys(job_field)
     search_bar.send_keys(Keys.ENTER)
     time.sleep(5)
 
     print("Now attempting to show all the jobs")
-    click_show_more_until_done(driver)
+    driver = click_show_more_until_done(driver)
     print("Now attemping to scrape all the jobs listings")
 
     time.sleep(2)
     job_listings = driver.find_elements(By.CSS_SELECTOR, "li.JobsList_jobListItem__wjTHv")[:-1]
-    print(f"Total available job listings to scrape: {len(job_listings)}")
+    print(f"Total {job_field} job listings to scrape: {len(job_listings)}")
 
     for index, job_listing in enumerate(job_listings):
         if index >= max_jobs_to_scrape:
@@ -133,13 +132,13 @@ def get_keyword_data(job_field, max_jobs_to_scrape):
             job_listing = job_listings[index]
             try: job_listing.click()
             except ElementClickInterceptedException as e:
-                dismiss_modal(driver)
-            click_show_more_job_description(driver)
+                driver = dismiss_modal(driver)
+            driver = click_show_more_job_description(driver)
             
             #Scraping logic
             try:
                 # Targeting the h4 element with its class names
-                employer_name = job_listings[index].find_element(By.CSS_SELECTOR, "h4.heading_Heading__BqX5J.heading_Subhead__Ip1aW").text
+                employer_name = driver.find_element(By.CSS_SELECTOR, "h4.heading_Heading__BqX5J.heading_Subhead__Ip1aW").text
             except NoSuchElementException:
                 employer_name = 'null'
 
@@ -191,6 +190,7 @@ def get_keyword_data(job_field, max_jobs_to_scrape):
             })
 
             print(f"job counter {index + 1}")
+            time.sleep(1)
 
         except Exception as e: 
             print(f'Skipped: job counter {index + 1}. Error: {e}')
@@ -199,7 +199,7 @@ def get_keyword_data(job_field, max_jobs_to_scrape):
     driver.quit()
     return total_job_data_in_each_field
 
-def save_to_db(job_data):
+def save_to_db_glassdoor(job_data):
     df = pd.DataFrame(job_data)
     parent_wd = os.path.dirname(os.getcwd())
     cred_path = os.path.join(parent_wd, "airflow", "auth", "is3107-416813-f8b1bf76ef57.json")
@@ -229,46 +229,24 @@ default_args = {
 def glassdoor_scraper_dag():
     @task
     def scrape_glassdoor1():
-        SEARCH_QUERY_LIST = ["Data analyst", "Database administrator", "Data modeler"]
+        SEARCH_QUERY_LIST = ["Data analyst", "Data scientist", "Business analyst"]
         for job_field in SEARCH_QUERY_LIST:
-            total_job_data = get_keyword_data(job_field, max_jobs_to_scrape)
-            save_to_db(total_job_data)
+            total_job_data = get_keyword_data_glassdoor(job_field, max_jobs_to_scrape)
+            if len(total_job_data) < 35: # if too little, might have error
+                total_job_data = get_keyword_data_glassdoor(job_field, max_jobs_to_scrape)
+            save_to_db_glassdoor(total_job_data)
         return total_job_data[:1]
 
     @task
     def scrape_glassdoor2():
         SEARCH_QUERY_LIST = ["Software engineer", "Data engineer", "Data architect"]
         for job_field in SEARCH_QUERY_LIST:
-            total_job_data = get_keyword_data(job_field, max_jobs_to_scrape)
-            save_to_db(total_job_data)
+            total_job_data = get_keyword_data_glassdoor(job_field, max_jobs_to_scrape)
+            if len(total_job_data) < 35: # if too little, might have error
+                total_job_data = get_keyword_data_glassdoor(job_field, max_jobs_to_scrape)
+            save_to_db_glassdoor(total_job_data)
         return total_job_data[:1]
     
-    @task
-    def scrape_glassdoor3():
-        SEARCH_QUERY_LIST = ["Statistician", "Business intelligence developer", "Marketing scientist"]
-        for job_field in SEARCH_QUERY_LIST:
-            total_job_data = get_keyword_data(job_field, max_jobs_to_scrape)
-            save_to_db(total_job_data)
-        return total_job_data[:1]
-
-    @task
-    def scrape_glassdoor4():
-        # SEARCH_QUERY_LIST = ["Business analyst", "Quantitative analyst", "Data scientist"]
-        SEARCH_QUERY_LIST = ["Quantitative analyst", "Data scientist"]
-        for job_field in SEARCH_QUERY_LIST:
-            total_job_data = get_keyword_data(job_field, max_jobs_to_scrape, )
-            save_to_db(total_job_data)
-        return total_job_data[:1]
-    
-    @task
-    def scrape_glassdoor5():
-        SEARCH_QUERY_LIST = ["Computer & information research scientist", "Machine learning engineer"]
-        for job_field in SEARCH_QUERY_LIST:
-            total_job_data = get_keyword_data(job_field, max_jobs_to_scrape)
-            save_to_db(total_job_data)
-        return total_job_data[:1]
-    
-    scrape_glassdoor5()
-    # [scrape_glassdoor1(), scrape_glassdoor2()]
+    [scrape_glassdoor1(), scrape_glassdoor2()]
 
 dag_instance = glassdoor_scraper_dag()
