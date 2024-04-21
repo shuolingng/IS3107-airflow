@@ -63,7 +63,7 @@ x-airflow-common:
     AIRFLOW__CORE__DAGBAG_IMPORT_TIMEOUT: 100
     AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
     AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
-    PYTHONASYNCIODEBUG: 1
+    AIRFLOW__CORE__SQLALCHEMY_POOL_SIZE: 0 # 0 indicates no limit
     AIRFLOW__API__AUTH_BACKENDS: 'airflow.api.auth.backend.basic_auth,airflow.api.auth.backend.session'
     # yamllint disable rule:line-length
     # Use simple http server on scheduler for health checks
@@ -98,12 +98,27 @@ services:
       POSTGRES_DB: airflow
     volumes:
       - postgres-db-volume:/var/lib/postgresql/data
+      - ./initdb.d:/docker-entrypoint-initdb.d
     healthcheck:
       test: ["CMD", "pg_isready", "-U", "airflow"]
       interval: 10s
       retries: 5
       start_period: 5s
     restart: always
+
+  pgbouncer:
+    image: edoburu/pgbouncer
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USER=airflow
+      - DB_PASSWORD=airflow
+      - ADMIN_USERS=postgres,admin
+    depends_on:
+      - postgres
 
   redis:
     image: redis:latest
@@ -124,7 +139,7 @@ services:
       - "8080:8080"
     healthcheck:
       test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
-      interval: 10s
+      interval: 30s
       timeout: 10s
       retries: 5
     restart: always
