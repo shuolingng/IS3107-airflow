@@ -76,10 +76,6 @@ x-airflow-common:
   volumes:
     - ${AIRFLOW_PROJ_DIR:-.}/dags:/opt/airflow/dags
     - ${AIRFLOW_PROJ_DIR:-.}/logs:/opt/airflow/logs
-    - ${AIRFLOW_PROJ_DIR:-.}/config:/opt/airflow/config
-    - ${AIRFLOW_PROJ_DIR:-.}/plots:/opt/airflow/plots
-    - ${AIRFLOW_PROJ_DIR:-.}/datasets:/opt/airflow/datasets
-    - ${AIRFLOW_PROJ_DIR:-.}/reports:/opt/airflow/reports
     - ${AIRFLOW_PROJ_DIR:-.}/auth:/opt/airflow/auth
   user: "${AIRFLOW_UID:-50000}:0"
   depends_on:
@@ -98,7 +94,6 @@ services:
       POSTGRES_DB: airflow
     volumes:
       - postgres-db-volume:/var/lib/postgresql/data
-      - ./initdb.d:/docker-entrypoint-initdb.d
     healthcheck:
       test: ["CMD", "pg_isready", "-U", "airflow"]
       interval: 10s
