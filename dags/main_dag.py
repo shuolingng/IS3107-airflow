@@ -2,7 +2,7 @@ from indeed_scraper import get_keyword_data_indeed, save_to_db_indeed
 from glassdoor_scraping_v1 import get_keyword_data_glassdoor, save_to_db_glassdoor
 from adzuna_api import adzuna_get_onepg
 from airflow.decorators import dag, task
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 import pandas as pd
 from google.oauth2 import service_account
 import pandas_gbq
@@ -47,8 +47,11 @@ def convert_to_num(string):
 def extract_date(date_str):
     """Extracts date from datetime string, returns None if format is incorrect."""
     try:
-        datetime_object = datetime.strptime(date_str.strip(), '%d %B %Y')
-        return datetime_object.date()
+        if isinstance(date_str, date):
+            return date_str
+        else:
+            datetime_object = datetime.strptime(date_str.strip(), '%d %B %Y')
+            return datetime_object.date()
     except ValueError:
         return None
     
@@ -78,8 +81,7 @@ default_args = {
 @dag(
     dag_id="main_dag",
     default_args=default_args,
-    # schedule=None,
-    schedule_interval="0 10,19 * * *",  # daily at 10am & 7pm
+    schedule_interval="@daily",  # daily at 12am
     catchup=False,
     tags=['is3107']
 )
@@ -130,126 +132,67 @@ def main_dag():
     def clean_and_process_data(fetched_data):
         indeed, glassdoor, api = fetched_data
         """Cleans and processes the fetched data frames."""
-        #indeed
-        initial_rows = len(indeed)
+        # INDEED
         indeed.dropna(subset=['Date_scraped'], inplace=True)
-        print(f"Number of rows dropped due to missing 'Date_scraped': {initial_rows - len(indeed)}")
-        cols = indeed.columns[indeed.columns != 'Date_scraped']
-        duplicated_before = indeed.duplicated(subset=cols, keep=False).sum()
+        # remove duplicates on all col except link (for those with same job but diff link)
+        cols = indeed.columns[indeed.columns != 'Application_link']
         indeed = indeed.drop_duplicates(subset=cols, keep='last')
-        print(f"Number of duplicated rows dropped (excluding 'Date_scraped'): {duplicated_before}")
-        indeed = indeed.groupby('Application_link').agg({
-            'Title': 'first',
-            'Company': 'first',
-            'Salary': 'first',
-            'Salary_min': 'first',
-            'Salary_max': 'first',
-            'Salary_freq': 'first',
-            'Type': 'first',
-            'Availability_requests': 'first',
-            'Requirements_short': 'first',
-            'Description': 'first',
-            'Requirements_full': 'first',
-            'Responsibilities': 'first',
-            'Field': 'first',
-            'Date_scraped': 'first'
-        }).reset_index()
+        # clean text fields
         text_columns = ['Requirements_short', 'Requirements_full', 'Responsibilities', 'Description']
         for col in text_columns:
             indeed[col] = indeed[col].apply(clean_text)
-        for col_prefix in ['Salary_min', 'Salary_max']:
-            indeed[f'{col_prefix}_month'] = indeed.apply(
-                lambda row: standardise_salary(row[col_prefix], row['Salary_freq']), axis=1
-            )
-        indeed.drop(columns=['Salary_min', 'Salary_max', 'Salary_freq'], inplace=True)
         indeed['Data_source'] = 'Indeed'
-        indeed['Date_scraped'] = indeed['Date_scraped'].apply(extract_date)
 
-        #adzuna
+        # ADZUNA
         api['Salary_min'] = pd.to_numeric(api['Salary_min'], errors='coerce')
         api['Salary_max'] = pd.to_numeric(api['Salary_max'], errors='coerce')
-        cols = api.columns[api.columns != 'Date_scraped']
-        duplicated_before = api.duplicated(subset=cols, keep=False).sum()
-        api = api.drop_duplicates(subset=cols, keep='last')
-        print(f"Number of duplicated rows dropped (excluding 'Date_scraped'): {duplicated_before}")
-        api = api.groupby('Application_link').agg({
-            'Company': 'first',
-            'Created_date': 'first',
-            'Description': 'first',
-            'Job_id': 'first',
-            'Salary_min': 'first',
-            'Salary_max': 'first',
-            'Title': 'first',
-            'Field': 'first', #try put in set
-            'Is_internship': 'first',
-            'Salary_freq': 'first',
-            'Date_scraped': 'first'
-        }).reset_index()
-        api['Salary_min_month'] = api.apply(lambda row: standardise_salary(row['Salary_min'], row['Salary_freq']), axis=1)
-        api['Salary_max_month'] = api.apply(lambda row: standardise_salary(row['Salary_max'], row['Salary_freq']), axis=1)
-        api.drop(columns=['Salary_min', 'Salary_max', 'Salary_freq'], inplace=True)
+        api = api[api['Field'].str.strip() != ''] # irrelevant roles
         api['Data_source'] = 'Adzuna'
 
-        #Glassdoor
+        # GLASSDOOR
         glassdoor['Salary_min'] = pd.to_numeric(glassdoor['Salary_min'], errors='coerce')
         glassdoor['Salary_max'] = pd.to_numeric(glassdoor['Salary_max'], errors='coerce')
-        cols = glassdoor.columns[glassdoor.columns != 'Date_scraped']
-        duplicated_before = glassdoor.duplicated(subset=cols, keep=False).sum()
+        # remove duplicates on all col except link
+        cols = glassdoor.columns[glassdoor.columns != 'Application_link']
         glassdoor = glassdoor.drop_duplicates(subset=cols, keep='last')
-        print(f"Number of duplicated rows dropped (excluding 'Date_scraped'): {duplicated_before}")
-        glassdoor = glassdoor.groupby('Application_link').agg({
-            'Company': 'first',
-            'Location': 'first',
-            'Salary': 'first',
-            'Salary_min': 'first',
-            'Salary_max': 'first',
-            'Salary_freq': 'first',
-            'Description': 'first',
-            'Size': 'first',
-            'Founded': 'first',
-            'Type': 'first',
-            'Industry': 'first',
-            'Sector': 'first',
-            'Revenue': 'first',
-            'Date_scraped': 'first',
-            'Field': 'first',
-            'Title': 'first'
-        }).reset_index()
         glassdoor['Description'] = glassdoor['Description'].apply(clean_text).apply(clean_html)
-        glassdoor['Salary_min_month'] = glassdoor.apply(lambda row: standardise_salary(row['Salary_min'], row['Salary_freq']), axis=1)
-        glassdoor['Salary_max_month'] = glassdoor.apply(lambda row: standardise_salary(row['Salary_max'], row['Salary_freq']), axis=1)
-        glassdoor.drop(columns=['Salary_min', 'Salary_max', 'Salary_freq'], inplace=True)
+        glassdoor['Company'] = glassdoor['Company'].replace('null', pd.NA)
         glassdoor['Data_source'] = 'Glassdoor'
 
-        # Combine datasets
+        # COMBINE
         combined = pd.concat([indeed, glassdoor, api], ignore_index=True)
-        return combined
+        combined = combined.dropna(subset=['Date_scraped', 'Title', 'Company'])
+        combined = combined[combined['Title'].str.strip() != ''] # empty strings
+        combined['Date_scraped'] = combined['Date_scraped'].apply(extract_date)
+
+        # Deal with duplicates
+        priority_order = {'Indeed': 1, 'Glassdoor': 2, 'Adzuna': 3}
+        combined['priority'] = combined['Data_source'].map(priority_order)
+        combined_sorted = combined.sort_values(['Date_scraped', 'priority'], ascending=[False, True])
+        columns_to_agg = [col for col in combined_sorted.columns if col not in ['Title', 'Company', 'Field']]
+        aggregation_dict = {col: 'first' for col in columns_to_agg}
+        aggregation_dict.update({'Field': lambda x: set(x)})
+        combined_clean = combined_sorted.groupby(['Title', 'Company']).agg(aggregation_dict).reset_index()
+        combined_clean['Field'] = combined_clean['Field'].apply(lambda x: ' '.join(x))
+
+        # standardise salary
+        combined_clean['Salary_min_month'] = combined_clean.apply(lambda row: standardise_salary(row['Salary_min'], row['Salary_freq']), axis=1)
+        combined_clean['Salary_max_month'] = combined_clean.apply(lambda row: standardise_salary(row['Salary_max'], row['Salary_freq']), axis=1)
+        combined_clean.drop(columns=['Salary_min', 'Salary_max', 'Salary_freq'], inplace=True)
+        return combined_clean
 
     @task
     def upload_to_bigquery(combined_clean):
         """Uploads processed data to BigQuery."""
-        combined_clean = combined_clean.dropna(subset=['Title'])
-        priority_order = {'Indeed': 1, 'Glassdoor': 2, 'Adzuna': 3}
-        combined_clean['priority'] = combined_clean['Data_source'].map(priority_order)
-        combined_sorted = combined_clean.sort_values(
-            ['Date_scraped', 'priority'],
-            ascending=[False, True]
-        )
-        combine_clean = combined_sorted.drop_duplicates(
-            subset=['Title', 'Company'],
-            keep='first',
-            ignore_index=True
-        )
-        combine_clean.drop(columns=['priority'], inplace=True)
         column_order = [
             'Title', 'Company', 'Description', 'Field', 
             'Date_scraped', 'Data_source', 'Application_link',
             'Salary_min_month', 'Salary_max_month', 'Requirements_short', 
             'Requirements_full', 'Type', 'Responsibilities', 'Salary', 
             'Location', 'Size', 'Founded', 'Industry', 'Sector', 'Revenue', 
-            'Availability_requests', 'Created_date', 'Job_id'
+            'Availability_requests', 'Created_date', 'Job_id', 'priority'
         ]
-        combine_clean = combine_clean[column_order]
+        combined_clean = combined_clean[column_order]
 
         # Credentials and project ID
         table_id = 'is3107_scraped_data.final_table'
